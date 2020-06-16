@@ -1,12 +1,18 @@
 menu "Frida LCD Test"
-    choice LCD_TEST_PINNED_TO_CORE_CHOICE
-        prompt "The cpu core which LCD test run"
-        depends on !FREERTOS_UNICORE
-        config LCD_TEST_PINNED_TO_CORE_0
-            bool "Core 0 (PRO CPU)"
-        config LCD_TEST_PINNED_TO_CORE_1
-            bool "Core 1 (APP CPU)"
-        config LCD_EST_NO_CORE_AFFINITY
-            bool "No Affinity (PRO or APP CPU)"
-    endchoice
+    config LCD_TEST_ENABLE
+      bool "Enable LCD Test"
+      default n
+      menu "Frida LCD Test config"
+        visible if LCD_TEST_ENABLE
+        choice LCD_TEST_PINNED_TO_CORE_CHOICE
+            prompt "The cpu core which LCD test run"
+            depends on !FREERTOS_UNICORE
+            config LCD_TEST_PINNED_TO_CORE_0
+                bool "Core 0 (PRO CPU)"
+            config LCD_TEST_PINNED_TO_CORE_1
+                bool "Core 1 (APP CPU)"
+            config LCD_EST_NO_CORE_AFFINITY
+                bool "No Affinity (PRO or APP CPU)"
+        endchoice
+      endmenu
 endmenu

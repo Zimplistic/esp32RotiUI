@@ -15,6 +15,8 @@
 
 static const char *TAG = "main";
 
+#define IRAM_BSS_ATTR
+
 #define BUFFER_SZ_IN_PIXEL    (CONFIG_LCD_PARALLEL_LINE_COUNT * CONFIG_LCD_H_RES)
 IRAM_BSS_ATTR static rgb_t pixel[BUFFER_SZ_IN_PIXEL];
 

@@ -13,6 +13,14 @@
 #include "string.h"
 #include "lvgl.h"
 
+#include <sys/debug.h>
+#include <sys/panic.h>
+#include <sys/mount.h>
+
+#include <drivers/gpio.h>
+
+#include <pthread.h>
+
 static const char *TAG = "main";
 
 #define IRAM_BSS_ATTR
@@ -47,11 +55,12 @@ static void _app_gfx_flush(
     }
 }
 
-static void _lvgl_workTask(void *pvParam) {
+static void *_lvgl_workTask(void *pvParam) {
     gfx_flush_req_t req;
     esp_err_t ret = ESP_OK;
     
     ESP_LOGI(TAG, "LVGL worker task running..\n");
+
     while(1) {
         if(pdPASS == xQueueReceive(xLvglWorkerQueue, &req, portMAX_DELAY)) {
             ret = lcd_writePixels(req.area->x1, req.area->x2,
@@ -62,8 +71,11 @@ static void _lvgl_workTask(void *pvParam) {
             lv_disp_flush_ready(req.disp_drv);
         }
     }
+    return NULL;
 }
 
+static pthread_t lua_lvgl_thread;
+static pthread_t lua_lvgl_worker_thread;
 static lv_obj_t * main_screen;
 static lv_obj_t * slider_label;
 
@@ -100,18 +112,17 @@ IRAM_ATTR static void uiTest(void)
 }
 
 
-IRAM_ATTR static void _lvgl_mainTask(void *pvParam)
+IRAM_ATTR static void *_lvgl_mainTask(void *pvParam)
 {
     uiTest();
     lcd_set_bl_state(1);
-
     ESP_LOGI(TAG, "LVGL main task running..\n");
-
     while(1) { 
-        vTaskDelay(1);
+        usleep(portTICK_RATE_MS * 1000);
         lv_tick_inc(portTICK_RATE_MS);
         lv_task_handler();
     }
+    return NULL;
 }
 
 static bool _touch_ft6336_cb(struct _lv_indev_drv_t * indev_drv, lv_indev_data_t * data)
@@ -133,6 +144,80 @@ static bool _touch_ft6336_cb(struct _lv_indev_drv_t * indev_drv, lv_indev_data_t
     }
 
     return false;
+}
+
+void _lvgl_main_thread_init()
+{
+    // Create and run a pthread for the Lua interpreter
+    pthread_attr_t attr;
+    struct sched_param sched;
+    int res;
+
+    debug_free_mem_begin(lua_lvgl_thread);
+
+    // Init thread attributes
+    pthread_attr_init(&attr);
+
+    // Set stack size
+    pthread_attr_setstacksize(&attr, 8192);
+
+    // Set priority
+    sched.sched_priority = tskIDLE_PRIORITY + 1;
+    pthread_attr_setschedparam(&attr, &sched);
+
+    // Set CPU
+    cpu_set_t cpu_set = CPU_INITIALIZER;
+
+    CPU_SET(CONFIG_LUA_RTOS_LUA_TASK_CPU, &cpu_set);
+
+    pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpu_set);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+    // Create thread
+    res = pthread_create(&lua_lvgl_thread, &attr, _lvgl_mainTask, NULL);
+    if (res) {
+        panic("Cannot start lua");
+    }
+
+    pthread_setname_np(lua_lvgl_thread, "lua_lvgl");
+    debug_free_mem_end(lua_lvgl_thread, NULL);
+}
+
+void _lvgl_worker_thread_init()
+{
+    // Create and run a pthread for the Lua interpreter
+    pthread_attr_t attr;
+    struct sched_param sched;
+    int res;
+
+    debug_free_mem_begin(lua_lvgl_worker_thread);
+
+    // Init thread attributes
+    pthread_attr_init(&attr);
+
+    // Set stack size
+    pthread_attr_setstacksize(&attr, 2048);
+
+    // Set priority
+    sched.sched_priority = tskIDLE_PRIORITY + 2;
+    pthread_attr_setschedparam(&attr, &sched);
+
+    // Set CPU
+    cpu_set_t cpu_set = CPU_INITIALIZER;
+
+    CPU_SET(CONFIG_LUA_RTOS_LUA_TASK_CPU, &cpu_set);
+
+    pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpu_set);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+    // Create thread
+    res = pthread_create(&lua_lvgl_worker_thread, &attr, _lvgl_workTask, NULL);
+    if (res) {
+        panic("Cannot start lua");
+    }
+
+    pthread_setname_np(lua_lvgl_worker_thread, "lua_lvgl_worker");
+    debug_free_mem_end(lua_lvgl_worker_thread, NULL);
 }
 
 void esp32_fridal_test()
@@ -158,36 +243,16 @@ void esp32_fridal_test()
     indev_drv.read_cb = _touch_ft6336_cb;
     lv_indev_drv_register(&indev_drv);
 
-    /* LVGL main task */
-    if(pdPASS != xTaskCreatePinnedToCore(
-                        _lvgl_mainTask,
-                        "lvgl_main",
-                        8192,
-                        (void*)0,
-                        tskIDLE_PRIORITY + 1,
-                        &xTaskHandleLvgl,
-                        APP_CPU_NUM)) {
-        ESP_LOGE(TAG, "%s:%d: Failed to create LVGL main task!\n", __FUNCTION__, __LINE__);
-        return;
-    }
+    /*Using thread*/
+    _lvgl_main_thread_init();
 
     /* Create worker task for Flushing */
-    xLvglWorkerQueue = xQueueCreate(2, sizeof(gfx_flush_req_t));
+    xLvglWorkerQueue = xQueueCreate(1, sizeof(gfx_flush_req_t));
     if(!xLvglWorkerQueue) {
         ESP_LOGE(TAG, "%s:%d: Failed to create LVGL worker Queue!\n", __FUNCTION__, __LINE__);
         return;
     }
-    if(pdPASS != xTaskCreatePinnedToCore(
-                            _lvgl_workTask,
-                            "lvgl_worker",
-                            2048,
-                            (void*)0,
-                            tskIDLE_PRIORITY + 2,
-                            &xTaskHandleLvglWorker,
-                            APP_CPU_NUM)) {
-        ESP_LOGE(TAG, "%s:%d: Failed to create LVGL worker task!\n", __FUNCTION__, __LINE__);
-        return;
-    }
+    _lvgl_worker_thread_init();
 
     ESP_LOGI(TAG, "Goodbye app_main()\n");
 }

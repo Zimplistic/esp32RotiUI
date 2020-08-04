@@ -28,61 +28,85 @@
 #include "lua.h"
 #include "lauxlib.h"
 
+#include "roti_main_screen.h"
+
 static const char *TAG = "ui";
 
 static lv_obj_t * main_screen;
-static lv_obj_t * slider_label;
 
-static void slider_event_cb(lv_obj_t * slider, lv_event_t event)
+static void lua_event_call(char * function_name)
 {
-    if(event == LV_EVENT_VALUE_CHANGED) {
-        static char buf[4]; /* max 3 bytes for number plus 1 null terminating byte */
-        snprintf(buf, 4, "%u", lv_slider_get_value(slider));
-        lv_label_set_text(slider_label, buf);
-
-        /*Send event to lua engine*/
-        lua_State *L = get_lua_state();
-        if (L == NULL)
-        {
-            ESP_LOGE(TAG, "lua_State is null");
-            return;
-        }
-        /*Call lua function*/
-        lua_getglobal(L, "ui_cb_test");
-        if (lua_pcall(L, 0, 0, 0) != 0)
-        {
-            ESP_LOGE(TAG, "Error calling callback Lua function: %s", lua_tostring(L, -1));
-            lua_pop(L, -1);
-        }
+    /*Send event to lua engine*/
+    lua_State *L = get_lua_state();
+    if (L == NULL)
+    {
+        ESP_LOGE(TAG, "lua_State is null");
+        return;
+    }
+    /*Call lua function*/
+    lua_getglobal(L, function_name);
+    if (lua_pcall(L, 0, 0, 0) != 0)
+    {
+        ESP_LOGE(TAG, "Error %s", lua_tostring(L, -1));
+        lua_pop(L, -1);
     }
 }
 
+/*cb functions for main screen*/
+static void roti_scrn_btn_minus(lv_obj_t *btn, lv_event_t evnt)
+{
+    if (evnt == LV_EVENT_RELEASED)
+    {
+        ESP_LOGI(TAG, "minus pressed, ent: %d", evnt);
+        lua_event_call("roti_main_minus_btn");
+    }
+}
+
+static void roti_scrn_btn_plus(lv_obj_t *btn, lv_event_t evnt)
+{
+    if (evnt == LV_EVENT_RELEASED)
+    {
+        ESP_LOGI(TAG, "plus pressed, ent: %d", evnt);
+        lua_event_call("roti_main_plus_btn");
+    }
+}
+
+static void roti_scrn_btn_play(lv_obj_t *btn, lv_event_t evnt)
+{
+    if (evnt == LV_EVENT_RELEASED)
+    {
+        ESP_LOGI(TAG, "play pressed, ent: %d", evnt);
+//        lua_event_call("roti_main_play_btn");/*TODO: uncomment this code*/
+    }
+}
+
+lv_event_cb_t roti_main_screen_btn_minus_cb = roti_scrn_btn_minus;
+lv_event_cb_t roti_main_screen_btn_plus_cb = roti_scrn_btn_plus;
+lv_event_cb_t roti_main_screen_btn_play_cb = roti_scrn_btn_play;
+extern lv_obj_t *roti_main_scr_label_NoRoti;
+
 static int uiTest(void)
 {
-    lv_obj_t * label;
-    lv_obj_t * slider;
     main_screen = lv_disp_get_scr_act(NULL);
+    roti_main_screen_create(main_screen);
+    return 0;
+}
 
-    label = lv_label_create(main_screen, NULL);
-    lv_label_set_recolor(label, true);
-    lv_label_set_text(label, "Hello World!\nTest #ff0000 red# #00ff00 green# #0000ff blue#\n");
-    lv_obj_align(label, NULL, LV_ALIGN_CENTER, 0, 0);
-
-    slider = lv_slider_create(main_screen, NULL);
-    lv_obj_set_width(slider, LV_DPI * 2);
-    lv_obj_align(slider, label, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
-    lv_obj_set_event_cb(slider, slider_event_cb);
-    lv_slider_set_range(slider, 0, 100);
-
-    slider_label = lv_label_create(main_screen, NULL);
-    lv_label_set_text(slider_label, "0");
-    lv_obj_set_auto_realign(slider_label, true);
-    lv_obj_align(slider_label, slider, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+static int roti_main_no_roti_lable_update(lua_State *L)
+{
+    uint16_t no_roti = luaL_checkinteger(L, 1);
+    if(roti_main_scr_label_NoRoti != NULL)
+    {
+        char buf[3];
+        sprintf(buf, "%d", no_roti);
+        lv_label_set_text(roti_main_scr_label_NoRoti, buf);
+    }
     return 0;
 }
 
 const LUA_REG_TYPE ui_map[] = {
         { LSTRKEY( "test"  ),            LFUNCVAL( uiTest ) },
+        { LSTRKEY( "no_roti_lbl"  ),            LFUNCVAL( roti_main_no_roti_lable_update ) },
         { LNILKEY, LNILVAL }
 };
 

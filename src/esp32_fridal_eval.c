@@ -50,12 +50,14 @@ static void _app_gfx_flush(
 static void _lvgl_workTask(void *pvParam) {
     gfx_flush_req_t req;
     esp_err_t ret = ESP_OK;
-    
+    uint32_t nPx;
+
     ESP_LOGI(TAG, "LVGL worker task running..\n");
     while(1) {
         if(pdPASS == xQueueReceive(xLvglWorkerQueue, &req, portMAX_DELAY)) {
+            nPx = (req.area->x2 - req.area->x1 + 1) * (req.area->y2 - req.area->y1 + 1);
             ret = lcd_writePixels(req.area->x1, req.area->x2,
-                        req.area->y1, req.area->y2, req.disp_drv->buffer->buf_act, req.disp_drv->buffer->size);
+                        req.area->y1, req.area->y2, req.disp_drv->buffer->buf_act, nPx);
             if(ESP_OK != ret) {
                 ESP_LOGE(TAG, "%s:%d: Error%d", __FUNCTION__, __LINE__, ret);
             }
